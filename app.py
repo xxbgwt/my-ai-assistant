@@ -31,7 +31,7 @@ st.title("🌍 DeepSeek 全能助手 (联网版)")
 
 # 2. 配置 API (🔴 填你的 Key)
 client = OpenAI(
-    api_key="sk-c65fe0d9907d409086578b3de6cab3e0",
+    api_key="",
     base_url="https://api.deepseek.com"
 )
 
@@ -136,4 +136,5 @@ if prompt := st.chat_input("请输入问题..."):
             response = st.write_stream(stream)
             st.session_state.messages.append({"role": "assistant", "content": response})
         except Exception as e:
+
             st.error(f"出错: {e}")
