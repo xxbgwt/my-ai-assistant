@@ -1,47 +1,37 @@
 import streamlit as st
 from openai import OpenAI
 from pypdf import PdfReader
+from duckduckgo_search import DDGS  # 👈 新引入的搜索工具
 
 # 1. 页面配置
-st.set_page_config(page_title="DeepSeek Pro", page_icon="🔒", layout="wide")
+st.set_page_config(page_title="DeepSeek 全能版", page_icon="🌍", layout="wide")
 
 # ==========================================
-# 🔐 核心代码：简易登录门禁
+# 🔐 门禁系统 (你自己设的密码)
 # ==========================================
-
-# A. 初始化登录状态
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
-# B. 定义一个函数：检查密码
 def check_password():
-    # 🔴 在这里修改你的密码！
-    # 只有输入这个密码，才能进入 App
-    if st.session_state.password_input == "123456": 
+    if st.session_state.password_input == "888888":  # 🔴 你的密码
         st.session_state.logged_in = True
     else:
-        st.error("密码错误，请重试 ❌")
+        st.error("密码错误 ❌")
 
-# C. 如果没登录，就显示输入框，然后停止运行后面的代码
 if not st.session_state.logged_in:
     st.markdown("## 🔒 请输入访问密码")
-    st.text_input(
-        "Password", 
-        type="password",  # 隐藏输入的字符
-        key="password_input", 
-        on_change=check_password
-    )
-    st.stop()  # 🛑 关键：如果没有登录，程序在这里直接停止！后面的代码都不会执行
+    st.text_input("Password", type="password", key="password_input", on_change=check_password)
+    st.stop()
 
 # ==========================================
-# 👇 下面是原本的 App 代码（登录后才会看到）
+# 👇 主程序开始
 # ==========================================
 
-st.title("⚡ DeepSeek Pro (加密流式版)")
+st.title("🌍 DeepSeek 全能助手 (联网版)")
 
 # 2. 配置 API (🔴 填你的 Key)
 client = OpenAI(
-    api_key=st.secrets["DEEPSEEK_API_KEY"],
+    api_key="sk-c65fe0d9907d409086578b3de6cab3e0",
     base_url="https://api.deepseek.com"
 )
 
@@ -49,22 +39,20 @@ client = OpenAI(
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# === 侧边栏 ===
+# === 🎛️ 侧边栏 ===
 with st.sidebar:
-    st.success("✅ 已登录")
-    # 添加一个登出按钮
-    if st.button("🚪 退出登录"):
-        st.session_state.logged_in = False
-        st.rerun()
-        
+    st.header("🎛️ 能力开关")
+    
+    # 🔥 新功能：联网开关
+    enable_web = st.toggle("🌐 开启联网搜索", value=False, help="开启后，AI 会先搜索互联网再回答，适合问新闻/实时信息。")
+    
     st.divider()
     
-    st.header("🎛️ 控制面板")
     creativity = st.slider("🧠 创造力", 0.0, 1.3, 0.7)
     
     st.divider()
     
-    uploaded_file = st.file_uploader("📂 上传文档", type=["pdf", "txt"])
+    uploaded_file = st.file_uploader("📂 上传文档 (RAG)", type=["pdf", "txt"])
     file_content = ""
     if uploaded_file:
         try:
@@ -83,25 +71,59 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-# === 主界面聊天逻辑 ===
+# === 聊天主逻辑 ===
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 if prompt := st.chat_input("请输入问题..."):
     
+    # 1. 显示用户问题
     with st.chat_message("user"):
         st.markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
+    # 2. 准备上下文
     final_messages = []
-    if file_content:
-        final_messages.append({"role": "system", "content": f"基于文档回答：\n{file_content}"})
-    else:
-        final_messages.append({"role": "system", "content": "你是个好助手。"})
+    system_context = "你是一个智能助手。"
+
+    # === 🕵️‍♂️ 核心逻辑：处理联网搜索 ===
+    if enable_web:
+        # 显示一个状态条，让用户知道正在搜
+        with st.status("🕵️‍♂️ 正在搜索互联网...", expanded=True) as status:
+            try:
+                # 调用 DuckDuckGo 搜索
+                results = DDGS().text(prompt, max_results=3)
+                if results:
+                    web_content = ""
+                    for i, res in enumerate(results):
+                        st.write(f"📄 **来源 {i+1}**: [{res['title']}]({res['href']})")
+                        web_content += f"来源[{i+1}]: {res['body']}\n"
+                    
+                    # 把搜到的内容喂给 AI
+                    system_context = f"""
+                    你是一个具有联网能力的助手。
+                    请根据以下的【互联网搜索结果】来回答用户的问题。
+                    记得在回答中引用来源。
+                    
+                    【搜索结果】：
+                    {web_content}
+                    """
+                    status.update(label="✅ 搜索完成！", state="complete", expanded=False)
+                else:
+                    status.update(label="⚠️ 没搜到相关信息，将直接回答。", state="complete")
+            except Exception as e:
+                status.update(label=f"❌ 搜索出错: {e}", state="error")
     
+    # === 处理文档上下文 ===
+    if file_content:
+        system_context += f"\n\n此外，请参考以下【本地文档】内容：\n{file_content}"
+
+    # 组装最终的 Prompt
+    final_messages.append({"role": "system", "content": system_context})
     final_messages.extend(st.session_state.messages)
 
+    # 3. AI 回答
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         try:
